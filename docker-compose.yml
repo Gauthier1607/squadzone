@@ -1,0 +1,14 @@
+version: "3.8"
+services:
+  squadzone:
+    build: .
+    image: squadzone:latest
+    container_name: squadzone_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./squadzone.db:/app/squadzone.db
+    environment:
+      - NODE_ENV=production
