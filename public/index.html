@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SquadZone</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="fb-top">
+    <div class="fb-top-left">
+      <div class="brand"><div class="brand-s">S</div><div class="brand-text">SquadZone</div></div>
+      <div class="fb-search"><input id="globalSearch" placeholder="Rechercher sur SquadZone" /></div>
+    </div>
+    <nav class="fb-top-center">
+      <button class="tb-btn active" id="navHome" title="Accueil">🏠</button>
+      <button class="tb-btn" id="navWatch" title="Watch">📺</button>
+      <button class="tb-btn" id="navMarketplace" title="Marketplace">🛒</button>
+      <button class="tb-btn" id="navGroups" title="Groupes">👥</button>
+      <button class="tb-btn" id="navMessenger" title="Messages">💬</button>
+    </nav>
+    <div class="fb-top-right">
+      <div id="topUser" class="top-user"><img id="topAvatar" src="/assets/default-avatar.png"><span id="topName">Invité</span></div>
+      <button id="btnLogin" class="btn-ghost">Connexion</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <aside class="left-col">
+      <div class="left-card profile-card" id="leftProfile">
+        <img id="leftAvatar" src="/assets/default-avatar.png">
+        <div>
+          <div id="leftName">Invité</div>
+          <button id="btnEditProfile" class="small-ghost">Editer profil</button>
+        </div>
+      </div>
+
+      <div class="left-card">
+        <a class="left-link" id="linkFeed">Fil d'actualité</a>
+        <a class="left-link" id="linkFriends">Amis</a>
+        <a class="left-link" id="linkMessages">Messages</a>
+        <a class="left-link" id="linkStories">Stories</a>
+        <a class="left-link" id="linkSaved">Enregistrés</a>
+      </div>
+    </aside>
+
+    <main class="main-col">
+      <section class="stories-row" id="storiesRow"></section>
+
+      <section class="create-post card">
+        <div class="cp-left"><img id="cpAvatar" src="/assets/default-avatar.png"></div>
+        <div class="cp-right">
+          <input id="postText" placeholder="Quoi de neuf ?" />
+          <div class="cp-actions">
+            <input type="file" id="postImage" />
+            <button id="publishBtn" class="primary">Publier</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="feed" class="feed-col"></section>
+    </main>
+
+    <aside class="right-col">
+      <div class="right-card">
+        <h4>Contacts</h4>
+        <div id="contacts"></div>
+      </div>
+      <div class="right-card">
+        <h4>Suggestions</h4>
+        <div id="suggestions"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="modal" class="modal hidden"></div>
+
+<script>
+// Small frontend logic to wire nav and ensure buttons work
+async function apiJSON(url, opts){ const r = await fetch(url, opts); return r.json(); }
+async function currentUser(){ const r = await apiJSON('/api/me'); return r.user; }
+
+function showModal(html){ document.getElementById('modal').innerHTML = '<div class="dialog">'+html+'</div>'; document.getElementById('modal').classList.remove('hidden'); }
+function hideModal(){ document.getElementById('modal').classList.add('hidden'); document.getElementById('modal').innerHTML=''; }
+
+function setActiveNav(id){
+  document.querySelectorAll('.tb-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+document.getElementById('navHome').addEventListener('click', ()=>{ setActiveNav('navHome'); loadPosts(); });
+document.getElementById('navMessenger').addEventListener('click', ()=>{ setActiveNav('navMessenger'); openMessenger(); });
+
+document.getElementById('linkFeed').addEventListener('click', ()=>{ loadPosts(); });
+document.getElementById('linkFriends').addEventListener('click', ()=>{ loadFriends(); });
+document.getElementById('linkMessages').addEventListener('click', ()=>{ openMessenger(); });
+
+document.getElementById('btnLogin').addEventListener('click', ()=>{ showAuth(); });
+
+async function showAuth(){
+  showModal(`<h3>Connexion / Inscription</h3>
+    <div><input id="regName" placeholder="Nom"></div>
+    <div><input id="regEmail" placeholder="Email"></div>
+    <div><input id="regPass" placeholder="Mot de passe" type="password"></div>
+    <div><input id="regAvatar" type="file"></div>
+    <div style="margin-top:8px"><button id="doRegister">S'inscrire</button> <button id="doLogin">Se connecter</button> <button id="closeM">Fermer</button></div>`);
+  document.getElementById('closeM').onclick = hideModal;
+  document.getElementById('doRegister').onclick = async ()=>{
+    const fd = new FormData();
+    fd.append('name', document.getElementById('regName').value);
+    fd.append('email', document.getElementById('regEmail').value);
+    fd.append('password', document.getElementById('regPass').value);
+    const f = document.getElementById('regAvatar').files[0];
+    if(f) fd.append('avatar', f);
+    const res = await fetch('/api/register',{method:'POST', body: fd});
+    const j = await res.json();
+    if(j.error) alert(j.error); else { hideModal(); await refreshUI(); }
+  };
+  document.getElementById('doLogin').onclick = async ()=>{
+    const body = { email: document.getElementById('regEmail').value, password: document.getElementById('regPass').value };
+    const res = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify(body)});
+    const j = await res.json();
+    if(j.error) alert(j.error); else { hideModal(); await refreshUI(); }
+  };
+}
+
+document.getElementById('publishBtn').addEventListener('click', async ()=>{
+  const text = document.getElementById('postText').value;
+  const f = document.getElementById('postImage').files[0];
+  const fd = new FormData(); fd.append('text', text); if(f) fd.append('image', f);
+  const res = await fetch('/api/posts', { method:'POST', body: fd });
+  const j = await res.json();
+  if(j.error) alert(j.error); else { document.getElementById('postText').value=''; document.getElementById('postImage').value=''; loadPosts(); }
+});
+
+async function refreshUI(){
+  const u = await currentUser();
+  if(u){
+    document.getElementById('topName').innerText = u.name;
+    document.getElementById('topAvatar').src = u.avatar || '/assets/default-avatar.png';
+    document.getElementById('leftAvatar').src = u.avatar || '/assets/default-avatar.png';
+    document.getElementById('cpAvatar').src = u.avatar || '/assets/default-avatar.png';
+    document.getElementById('btnLogin').innerText = 'Se déconnecter';
+    document.getElementById('btnLogin').onclick = async ()=>{ await fetch('/api/logout',{method:'POST'}); location.reload(); };
+  } else {
+    document.getElementById('btnLogin').innerText = 'Connexion';
+    document.getElementById('btnLogin').onclick = showAuth;
+  }
+}
+
+async function loadPosts(){
+  setActiveNav('navHome');
+  const r = await fetch('/api/posts');
+  const j = await r.json();
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '';
+  for(const p of j.posts){
+    const div = document.createElement('div'); div.className='card post';
+    div.innerHTML = `
+      <div class="post-head"><img src="${p.author_avatar||'/assets/default-avatar.png'}"><div><b>${p.author_name}</b><small>${new Date(p.created).toLocaleString()}</small></div></div>
+      <div class="post-text">${p.text||''}</div>
+      ${p.image?`<img class="post-img" src="${p.image}">`:''}
+      <div class="post-actions">
+        <button class="like" data-id="${p.id}">❤️ ${p.like_count||0}</button>
+        <button class="comment" data-id="${p.id}">💬 Commenter</button>
+        <button class="share" data-id="${p.id}">↪️ Partager</button>
+      </div>
+      <div class="comments" id="comments-${p.id}"></div>
+    `;
+    feed.appendChild(div);
+
+    div.querySelector('.like').onclick = async ()=>{ await fetch('/api/posts/'+p.id+'/like',{method:'POST'}); loadPosts(); };
+    div.querySelector('.comment').onclick = async ()=>{ const text = prompt('Votre commentaire:'); if(text) { await fetch('/api/posts/'+p.id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({text})}); loadPosts(); } };
+    // load comments
+    const cj = await (await fetch('/api/posts/'+p.id+'/comments')).json();
+    const commentsDiv = document.getElementById('comments-'+p.id);
+    commentsDiv.innerHTML = cj.comments.map(c=>`<div class="comment-item"><img src="${c.author_avatar||'/assets/default-avatar.png'}"><div><b>${c.author_name}</b><div>${c.text}</div></div></div>`).join('');
+  }
+}
+
+async function loadFriends(){
+  setActiveNav('navGroups');
+  const r = await fetch('/api/friends'); const j = await r.json();
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '<h3>Amis</h3>';
+  for(const f of j.friends){ const d = document.createElement('div'); d.className='card'; d.innerHTML=`<div style="display:flex;gap:10px;align-items:center"><img src="${f.avatar||'/assets/default-avatar.png'}" style="width:48px;height:48px;border-radius:50%"><div><b>${f.name}</b></div></div>`; feed.appendChild(d); }
+}
+
+async function openMessenger(){
+  setActiveNav('navMessenger');
+  const feed = document.getElementById('feed');
+  feed.innerHTML = `<h3>Messages</h3><div id="msgArea"><div id="msgs" style="height:300px;overflow:auto;border:1px solid #eee;padding:8px;margin-bottom:8px"></div><input id="msgBox" placeholder="Écrire..."><button id="sendMsg">Envoyer</button></div>`;
+  const socket = io();
+  document.getElementById('sendMsg').onclick = ()=>{ const v = document.getElementById('msgBox').value; if(v){ socket.emit('chat_message', v); document.getElementById('msgBox').value=''; } };
+  socket.on('chat_message', m=>{ const el = document.createElement('div'); el.textContent = m; document.getElementById('msgs').appendChild(el); });
+}
+
+async function loadContacts(){
+  const r = await fetch('/api/users'); const j = await r.json();
+  const c = document.getElementById('contacts');
+  c.innerHTML = j.users.slice(0,6).map(u=>`<div class="contact-item"><img src="${u.avatar||'/assets/default-avatar.png'}"><div>${u.name}</div></div>`).join('');
+  const s = document.getElementById('suggestions'); s.innerHTML = j.users.slice(6,12).map(u=>`<div class="contact-item"><img src="${u.avatar||'/assets/default-avatar.png'}"><div>${u.name}</div><button class="add" data-id="${u.id}">Ajouter</button></div>`).join('');
+  document.querySelectorAll('.add').forEach(b=>b.onclick = async ()=>{ await fetch('/api/friends/'+b.getAttribute('data-id'),{method:'POST'}); alert('Ami ajouté (simulé)'); });
+}
+
+async function init(){
+  await refreshUI();
+  await loadPosts();
+  await loadContacts();
+}
+window.addEventListener('load', init);
+
+// open profile page
+async function openProfile(userId){
+  const r = await fetch('/api/users/'+userId);
+  const j = await r.json();
+  const feed = document.getElementById('feed');
+  feed.innerHTML = `<div class="card"><div style="display:flex;gap:12px;align-items:center"><img src="${j.user.avatar||'/assets/default-avatar.png'}" style="width:96px;height:96px;border-radius:12px"><div><h2>${j.user.name}</h2><p>${j.user.email||''}</p><button id="editProfileBtn" class="small-ghost">Editer le profil</button></div></div></div>`;
+  document.getElementById('editProfileBtn').onclick = ()=> showEditProfile(userId,j.user);
+  // append user's posts
+  for(const p of j.posts){
+    const div = document.createElement('div'); div.className='card post';
+    div.innerHTML = `<div class="post-head"><img src="${p.author_avatar||'/assets/default-avatar.png'}"><div><b>${p.author_name}</b><small>${new Date(p.created).toLocaleString()}</small></div></div><div>${p.text||''}</div>${p.image?`<img class="post-img" src="${p.image}">`:''}<div class="post-actions"><button class="like" data-id="${p.id}">❤️ ${p.like_count||0}</button><button class="comment" data-id="${p.id}">💬</button></div>`;
+    feed.appendChild(div);
+  }
+}
+
+function showEditProfile(userId, user){
+  showModal(`<h3>Edition du profil</h3>
+    <div><input id="editName" value="${user.name||''}" placeholder="Nom"></div>
+    <div><input id="editAvatar" type="file"></div>
+    <div style="margin-top:8px"><button id="saveProfile">Enregistrer</button> <button id="closeModal">Fermer</button></div>`);
+  document.getElementById('closeModal').onclick = hideModal;
+  document.getElementById('saveProfile').onclick = async ()=>{
+    const fd = new FormData();
+    fd.append('_method','put');
+    fd.append('name', document.getElementById('editName').value);
+    const f = document.getElementById('editAvatar').files[0];
+    if(f) fd.append('avatar', f);
+    const res = await fetch('/api/users/'+userId, { method: 'POST', body: fd });
+    const j = await res.json();
+    if(j.error) alert(j.error); else { hideModal(); refreshUI(); }
+  };
+}
+
+// enhanced openMessenger: shows conversations and allows 1:1 chat
+async function openMessenger(){
+  setActiveNav('navMessenger');
+  const feed = document.getElementById('feed');
+  feed.innerHTML = `<div class="card"><h3>Conversations</h3><div id="convList"></div></div><div class="card"><div id="convWindow"></div></div>`;
+  // load convos
+  const r = await fetch('/api/conversations');
+  const j = await r.json();
+  const convList = document.getElementById('convList');
+  convList.innerHTML = '';
+  for(const c of j.conversations){
+    const otherId = (c.user_a === currentUserId ? c.user_b : c.user_a);
+    // get other user info
+    const ur = await fetch('/api/users/'+otherId); const uj = await ur.json();
+    const btn = document.createElement('div'); btn.className='contact-item'; btn.innerHTML = `<img src="${uj.user.avatar||'/assets/default-avatar.png'}"><div>${uj.user.name}</div>`;
+    btn.onclick = ()=> openConversation(c.id, uj.user);
+    convList.appendChild(btn);
+  }
+  // create new conversation button
+  const newConvBtn = document.createElement('div'); newConvBtn.innerHTML = '<button id="newConvBtn" class="primary">Nouvelle conversation</button>'; convList.appendChild(newConvBtn);
+  document.getElementById('newConvBtn').onclick = async ()=>{
+    const email = prompt('Email de la personne');
+    if(!email) return;
+    // find user by email
+    const users = await (await fetch('/api/users')).json();
+    const found = users.users.find(u=>u.email === email || u.name === email);
+    if(!found){ alert('Utilisateur introuvable'); return; }
+    const res = await fetch('/api/conversations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ otherId: found.id }) });
+    const j2 = await res.json();
+    openConversation(j2.conversation.id, found);
+  };
+}
+
+async function openConversation(convId, otherUser){
+  const convWindow = document.getElementById('convWindow');
+  convWindow.innerHTML = `<h4>Conversation avec ${otherUser.name}</h4><div id="msgs" style="height:300px;overflow:auto;border:1px solid #eee;padding:8px"></div><input id="msgBox"><button id="sendMsg">Envoyer</button>`;
+  // load history
+  const res = await fetch('/api/conversations/'+convId+'/messages');
+  const j = await res.json();
+  const msgs = document.getElementById('msgs');
+  msgs.innerHTML = j.messages.map(m=>`<div><b>${m.sender_name}:</b> ${m.text}</div>`).join('');
+  // join socket room and listen
+  const socket = io();
+  socket.emit('join_conv', { convId });
+  socket.on('conv_message', m => {
+    if(m.conversation_id == convId) { const el = document.createElement('div'); el.innerHTML = `<b>${m.sender_name}:</b> ${m.text}`; msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight; }
+  });
+  document.getElementById('sendMsg').onclick = async ()=>{
+    const txt = document.getElementById('msgBox').value;
+    if(!txt) return;
+    await fetch('/api/conversations/'+convId+'/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text: txt }) });
+    document.getElementById('msgBox').value='';
+  };
+}
+
+// expose currentUserId to scripts
+let currentUserId = null;
+(async ()=>{ const u = await currentUser(); if(u) currentUserId = u.id; })();
+
+</script>
+<script src="/socket.io/socket.io.js"></script>
+</body>
+</html>
